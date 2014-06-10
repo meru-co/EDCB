@@ -101,6 +101,7 @@ protected:
 	//このオブジェクトが持つ設定変数を保護するロック
 	//独自にアトミック性を確保するオブジェクトは対象外
 	CRITICAL_SECTION settingLock;
+	CRITICAL_SECTION dmsLock;
 protected:
 	BOOL CheckTuijyu();
 

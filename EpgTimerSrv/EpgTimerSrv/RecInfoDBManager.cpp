@@ -4,6 +4,8 @@
 #include "../../Common/CtrlCmdUtil.h"
 #include "../../Common/TimeUtil.h"
 
+#define FILENAME_RECINFO2DATA L"RecInfo2Data.bin"
+
 CRecInfoDBManager::CRecInfoDBManager(void)
 {
 	this->lockEvent = CreateEvent(NULL, FALSE, TRUE, NULL);
@@ -70,7 +72,7 @@ void CRecInfoDBManager::LoadRecInfo()
 
 	wstring filePath = L""; 
 	GetSettingPath(filePath);
-	filePath += L"\\RecInfo2Data.bin";
+	filePath = filePath + L"\\" + FILENAME_RECINFO2DATA;
 
 	HANDLE hFile = CreateFile( filePath.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL );
 	if( hFile == INVALID_HANDLE_VALUE ){
@@ -152,7 +154,7 @@ void CRecInfoDBManager::SaveRecInfo()
 
 	wstring filePath = L""; 
 	GetSettingPath(filePath);
-	filePath += L"\\RecInfo2Data.bin";
+	filePath = filePath + L"\\" + FILENAME_RECINFO2DATA;
 
 	HANDLE hFile = _CreateDirectoryAndFile( filePath.c_str(), GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL );
 	if( hFile == INVALID_HANDLE_VALUE ){

@@ -4,6 +4,7 @@
 #include "HttpFileSend.h"
 #include "HttpRequestReader.h"
 #include "DLNAParseProtocolInfo.h"
+#include "DLNAParseConfig.h"
 #include "SOAPUtil.h"
 
 #include "DLNADmsContentDB.h"
@@ -11,7 +12,7 @@
 class CDLNADmsManager
 {
 public:
-	CDLNADmsManager(void);
+	CDLNADmsManager(CDLNAParseConfig& config, CDLNAParseProtocolInfo& protocol);
 	~CDLNADmsManager(void);
 
 	void SetRootUri(wstring& uri);
@@ -27,14 +28,16 @@ public:
 	int DeleteContainer(wstring objectID);
 	int AddContent(wstring containerObjectID, DLNA_DMS_CONTENT_META_INFO* info, wstring& objectID);
 	int RemoveContent(wstring objectID);
+	int GetContentList(wstring objectID, list<DLNA_DMS_CONTENT_INFO>* contentList=NULL, bool bAddChild=false, SYSTEMTIME* pUpdateTime=NULL, unsigned __int64 *pUpdateID=NULL);
 
-	int HttpRequest(string method, string uri, nocase::map<string, string>* headerList, CHttpRequestReader* reqReader, SOCKET clientSock, HANDLE stopEvent);
+	int HttpRequest(string method, string uri, nocase::map<string, string>* headerList, CHttpRequestReader* reqReader, SOCKET clientSock, struct sockaddr_in* client, HANDLE stopEvent);
 protected:
 	wstring rootUri;
 	wstring fileRootUri;
 	string uuid;
 	CHttpFileSend httpSend;
-	CDLNAParseProtocolInfo protocolInfo;
+	CDLNAParseConfig *pDlnaConfig;
+	CDLNAParseProtocolInfo *pProtocolInfo;
 
 	CDLNADmsContentDB dmsDB;
 
@@ -71,5 +74,21 @@ protected:
 	int UnSubscribe_AVT(nocase::map<string, string>* headerList, CHttpRequestReader* reqReader, SOCKET clientSock, HANDLE stopEvent);
 
 	void SendEvent();
+
+protected:
+	void Log(const int level, const char* format,...)
+	{
+		va_list arg;
+		va_start(arg, format);
+		pDlnaConfig->Log(level, format, arg);
+		va_end(arg);
+	}
+	void Log(const int level, const wchar_t* format,...)
+	{
+		va_list arg;
+		va_start(arg, format);
+		pDlnaConfig->Log(level, format, arg);
+		va_end(arg);
+	}
 };
 

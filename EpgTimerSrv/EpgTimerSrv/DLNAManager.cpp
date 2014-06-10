@@ -6,6 +6,7 @@
 #include "../../Common/PathUtil.h"
 
 CDLNAManager::CDLNAManager(void)
+	: dms(config, protocolInfo)
 {
 	this->upnpCtrl = NULL;
 	this->startDMS = FALSE;
@@ -13,17 +14,24 @@ CDLNAManager::CDLNAManager(void)
 
 	wstring filePath = L"";
 	GetModuleFolderPath(filePath);
+	filePath += L"\\dlna\\dms\\config.txt";
+	config.ParseText(filePath.c_str());
+
+	GetModuleFolderPath(filePath);
 	filePath += L"\\dlna\\dms\\protocolInfo.txt";
 	protocolInfo.ParseText(filePath.c_str());
 
+	Log(CDLNAParseConfig::LOG_DEBUG, L"Create root container\n");
 	DLNA_DMS_CONTAINER_META_INFO info;
 	info.title = L"RecFile";
 	info.uploadSupportFlag = 0;
-	dms.CreateContainer(L"0", &info, this->recFolderObjectID);
+	dms.CreateContainer(CDLNADmsContentDB::GetRootObjectID(), &info, this->recFolderObjectID);
+	Log(CDLNAParseConfig::LOG_DEBUG, L"  [ContainerID:%s] %s\n", this->recFolderObjectID.c_str(), info.title.c_str());
 
 	info.title = L"PublicFile";
 	info.uploadSupportFlag = 0;
-	dms.CreateContainer(L"0", &info, this->publicFolderObjectID);
+	dms.CreateContainer(CDLNADmsContentDB::GetRootObjectID(), &info, this->publicFolderObjectID);
+	Log(CDLNAParseConfig::LOG_DEBUG, L"  [ContainerID:%s] %s\n", this->publicFolderObjectID.c_str(), info.title.c_str());
 }
 
 
@@ -61,6 +69,9 @@ int CDLNAManager::LoadPublicFolder()
 	filePath += L"\\dlna\\dms\\publicFolder.txt";
 	publicFolder.ParseText(filePath.c_str());
 
+	ULONGLONG ullStart = GetTickCount64();
+	Log(CDLNAParseConfig::LOG_INFO, L"Add public folder file [%s]\n", filePath.c_str());
+
 	DLNA_DMS_CONTAINER_META_INFO info;
 
 	map<wstring, DLNA_PUBLIC_FOLDER_INFO>::iterator itrFolder;
@@ -76,15 +87,17 @@ int CDLNAManager::LoadPublicFolder()
 		info.uploadSupportFlag = 0;
 
 		wstring virtualPath = L"PublicFile/";
-		virtualPath += itrFolder->second.virtualPath;
+		virtualPath += itrFolder->second.virtualPath;		
 
 		wstring objectID;
 		if( this->dms.CreateContainer2(virtualPath, &info, objectID) != NO_ERR){
 			continue;
 		}
 
+		Log(CDLNAParseConfig::LOG_INFO, L"  [ContainerID:%s] %s > %s\n", objectID.c_str(), virtualPath.c_str(), info.uploadFolderPath.c_str());
 		AddFolderItem(itrFolder->second.folderPath, objectID);
 	}
+	Log(CDLNAParseConfig::LOG_INFO, L"Done. Time=%I64umsec.\n", GetTickCount64()-ullStart);
 
 	return NO_ERR;
 }
@@ -100,8 +113,10 @@ int CDLNAManager::AddFolderItem(wstring folderPath, wstring parentObjectID)
 	//指定フォルダのファイル一覧取得
 	find = FindFirstFile( searchKey.c_str(), &findData);
 	if ( find == INVALID_HANDLE_VALUE ) {
+		Log(CDLNAParseConfig::LOG_ERROR, L"    >can not search %s \n", folderPath.c_str());
 		return FALSE;
 	}
+	Log(CDLNAParseConfig::LOG_DEBUG, L"    >search %s \n", folderPath.c_str());
 	do{
 		if( (findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0 ){
 			wstring filePath;
@@ -121,6 +136,7 @@ int CDLNAManager::AddFolderItem(wstring folderPath, wstring parentObjectID)
 
 				wstring objectID;
 				if( this->dms.CreateContainer(parentObjectID, &info, objectID) == NO_ERR){
+					Log(CDLNAParseConfig::LOG_DEBUG, L"  [ContainerID:%s] [ParentID:%s] %s\n", objectID.c_str(), parentObjectID.c_str(), info.title.c_str());
 					AddFolderItem(subFolderPath, objectID);
 				}
 			}
@@ -155,6 +171,7 @@ int CDLNAManager::AddFileItem(wstring parentObjectID, wstring filePath, wstring&
 
 	HANDLE hFile = CreateFile( filePath.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL );
 	if( hFile == INVALID_HANDLE_VALUE ){
+		Log(CDLNAParseConfig::LOG_DEBUG, L"    >>can not add %s\n", filePath.c_str());
 		return 0;
 	}
 	DWORD sizeH = 0;
@@ -224,10 +241,25 @@ int CDLNAManager::StopDMS()
 	return NO_ERR;
 }
 
-int CDLNAManager::HttpRequest(string method, string uri, nocase::map<string, string>* headerList, CHttpRequestReader* reqReader, SOCKET clientSock, HANDLE stopEvent)
+int CDLNAManager::EnumContentList(bool bWrite)
+{
+	list<DLNA_DMS_CONTENT_INFO> contentList;
+	SYSTEMTIME stTime;
+	unsigned __int64 update_id;
+
+	int content_num = this->dms.GetContentList(CDLNADmsContentDB::GetRootObjectID(), bWrite ? &contentList : NULL, true, &stTime, &update_id);
+
+	Log(CDLNAParseConfig::LOG_INFO, L"Media server is %d content. UpdateID=%I64u\n", content_num, update_id);
+	if(bWrite) {
+		config.WriteContentList(&stTime, &contentList);
+	}
+	return 0;
+}
+
+int CDLNAManager::HttpRequest(string method, string uri, nocase::map<string, string>* headerList, CHttpRequestReader* reqReader, SOCKET clientSock,struct sockaddr_in* client, HANDLE stopEvent)
 {
 	if(uri.find("/dlna/dms/") == 0 ){
-		dms.HttpRequest(method, uri, headerList, reqReader, clientSock, stopEvent);
+		dms.HttpRequest(method, uri, headerList, reqReader, clientSock, client, stopEvent);
 	}
 	return NO_ERR;
 }

@@ -20,6 +20,7 @@
 CEpgTimerSrvMain::CEpgTimerSrvMain(void)
 {
 	InitializeCriticalSection(&settingLock);
+	InitializeCriticalSection(&dmsLock);
 
 	this->stopEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
 	this->sleepEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
@@ -69,6 +70,7 @@ CEpgTimerSrvMain::~CEpgTimerSrvMain(void)
 	}
 
 	DeleteCriticalSection(&settingLock);
+	DeleteCriticalSection(&dmsLock);
 }
 
 //メインループ処理
@@ -158,6 +160,7 @@ void CEpgTimerSrvMain::StartMain(
 			ResetEvent(this->sleepEvent);
 		}else if( retWait == WAIT_OBJECT_0 + 2 ){
 			//コールバック関数とデッドロックする可能性があるのでここで排他してはいけない
+			if(dlnaManager) dlnaManager->Log(CDLNAParseConfig::LOG_INFO, L"Reset DMS Server.\n");
 			ResetServer(tcpServer, httpServer, tcpSrvUtil);
 		}else if( retWait == WAIT_OBJECT_0 + 3 ){
 			reloadEpgChkFlag = TRUE;
@@ -238,6 +241,9 @@ void CEpgTimerSrvMain::StartMain(
 
 		if( this->reserveManager.IsRecInfoChg() == TRUE ){
 			AddRecFileDMS();
+			if(dlnaManager) {
+				dlnaManager->EnumContentList(true);
+			}
 		}
 
 		if( countChkSuspend > 10 ){
@@ -325,6 +331,7 @@ void CEpgTimerSrvMain::ResetServer(CTCPServer& tcpServer, CHttpServer& httpServe
 	BOOL enableHttpSrv_;
 	DWORD httpPort_;
 	BOOL enableDMS_;
+	DWORD dmsPort_;
 	{
 		CBlockLock lock(&this->settingLock);
 		enableTCPSrv_ = this->enableTCPSrv;
@@ -332,6 +339,7 @@ void CEpgTimerSrvMain::ResetServer(CTCPServer& tcpServer, CHttpServer& httpServe
 		enableHttpSrv_ = this->enableHttpSrv;
 		httpPort_ = this->httpPort;
 		enableDMS_ = this->enableDMS;
+		dmsPort_ = httpPort_ + 1;
 	}
 	if( enableTCPSrv_ == FALSE ){
 		tcpServer.StopServer();
@@ -346,28 +354,36 @@ void CEpgTimerSrvMain::ResetServer(CTCPServer& tcpServer, CHttpServer& httpServe
 	if( enableDMS_ == FALSE ){
 		tcpSrvUtil.StopServer();
 		{
-			CBlockLock lock(&this->settingLock);
+			CBlockLock lock(&this->dmsLock);
 			if( dlnaManager != NULL ){
+				dlnaManager->Log(CDLNAParseConfig::LOG_INFO, L"Stop DMS Server.\n");
 				dlnaManager->StopDMS();
 				dlnaManager->StopSSDPServer();
 				SAFE_DELETE(dlnaManager);
 			}
 		}
-	}else{
-		{
-			CBlockLock lock(&this->settingLock);
-			if( dlnaManager == NULL ){
+	}else{		
+		{			
+			CBlockLock lock(&this->dmsLock);
+			if( dlnaManager == NULL ){				
 				dlnaManager = new CDLNAManager;
-				dlnaManager->StartSSDPServer(httpPort_ + 1);
+				dlnaManager->StartSSDPServer(dmsPort_);				
+				dlnaManager->Log(CDLNAParseConfig::LOG_INFO, L"Load DMS Data.\n");
 				dlnaManager->LoadPublicFolder();
 				AddRecFileDMS();
+				dlnaManager->EnumContentList(true);
+
+				dlnaManager->Log(CDLNAParseConfig::LOG_INFO, L"Start DMS Server. port=%d\n", dmsPort_);
 				dlnaManager->StartDMS();
 			}else{
+				dlnaManager->Log(CDLNAParseConfig::LOG_INFO, L"Reset DMS Server.\n");
+				dlnaManager->Log(CDLNAParseConfig::LOG_INFO, L"Load DMS Data.\n");
 				dlnaManager->LoadPublicFolder();
 				AddRecFileDMS();
+				dlnaManager->EnumContentList(true);
 			}
 		}
-		tcpSrvUtil.StartServer(httpPort_ + 1, TcpAcceptCallback, this);
+		tcpSrvUtil.StartServer(dmsPort_, TcpAcceptCallback, this);
 	}
 }
 
@@ -2895,9 +2911,10 @@ int CALLBACK CEpgTimerSrvMain::TcpAcceptCallback(void* param, SOCKET clientSock,
 	}
 	else
 	if(uri.find("/dlna/") == 0 && sys->dlnaManager != NULL){
-		CBlockLock lock(&sys->settingLock);
+		// ここでロックすると応答中にほかの要求がきた場合に対処できない
+		// CBlockLock lock(&sys->dmsLock);
 		if( sys->dlnaManager != NULL ){
-			sys->dlnaManager->HttpRequest(method, uri, &headerList, &reqReader, clientSock, stopEvent);
+			sys->dlnaManager->HttpRequest(method, uri, &headerList, &reqReader, clientSock,client, stopEvent);
 		}
 	}
 	else
@@ -2918,6 +2935,8 @@ void CEpgTimerSrvMain::AddRecFileDMS()
 	if( dlnaManager == NULL || enableDMS == FALSE ){
 		return;
 	}
+	ULONGLONG ullStart = GetTickCount64();
+	dlnaManager->Log(CDLNAParseConfig::LOG_INFO, L"Add recorded file\n");
 	vector<REC_FILE_INFO> list;
 	if(this->reserveManager.GetRecFileInfoAll(&list) == TRUE ){
 		for( size_t i= 0; i<list.size(); i++ ){
@@ -2926,5 +2945,6 @@ void CEpgTimerSrvMain::AddRecFileDMS()
 			}
 		}
 	}
+	dlnaManager->Log(CDLNAParseConfig::LOG_INFO, L"Done. Time=%I64umsec.\n", GetTickCount64()-ullStart);
 }
 

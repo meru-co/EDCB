@@ -1,0 +1,12 @@
+*.suo
+*.user
+
+[Dd]ebug/
+[Rr]elease/
+
+ipch/
+test/
+
+Thumbs.db
+_UpgradeReport_Files/
+*.sdf

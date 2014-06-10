@@ -95,6 +95,8 @@ public:
 	CDLNADmsContentDB(void);
 	~CDLNADmsContentDB(void);
 
+	static wstring GetRootObjectID() { return L"0"; };
+
 	void SetRootUri(wstring uri);
 
 	int CreateContainer(wstring parentObjectID, DLNA_DMS_CONTAINER_META_INFO* info, wstring& objectID);
@@ -106,6 +108,7 @@ public:
 	int GetChildItem(wstring containerObjectID, vector<DLNA_DMS_CONTAINER_INFO>* childContainerList, vector<DLNA_DMS_CONTENT_INFO>* childContentList);
 	int GetContainerItem(wstring containerObjectID, DLNA_DMS_CONTAINER_INFO* info);
 	int GetContentItem(wstring contentObjectID, DLNA_DMS_CONTENT_INFO* info);
+	unsigned __int64 GetUpdateID(SYSTEMTIME* time);
 
 	int SearchFilePath(string uri, wstring& filePath);
 
@@ -117,9 +120,21 @@ protected:
 	wstring rootUri;
 	DLNA_DMS_CONTAINER_ITEM* root;
 	unsigned __int64 nextObjectID;
+	unsigned __int64 updateID;
 
 	map<wstring, DLNA_DMS_CONTAINER_ITEM*> containerList;
 	map<wstring, DLNA_DMS_CONTENT_ITEM*> contentList;
+	SYSTEMTIME stUpdateTime;
 
+	void ResetUpdateID()
+	{
+		updateID = 0;
+		UpdateID();
+	}
+	void UpdateID()
+	{
+		updateID++;
+		GetLocalTime(&stUpdateTime);
+	}
 };
 

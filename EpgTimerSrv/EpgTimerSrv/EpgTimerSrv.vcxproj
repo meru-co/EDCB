@@ -225,6 +225,7 @@
     <ClInclude Include="DLNADmsContentDB.h" />
     <ClInclude Include="DLNADmsManager.h" />
     <ClInclude Include="DLNAManager.h" />
+    <ClInclude Include="DLNAParseConfig.h" />
     <ClInclude Include="DLNAParseProtocolInfo.h" />
     <ClInclude Include="DLNAParsePublicFolder.h" />
     <ClInclude Include="EpgDBManager.h" />
@@ -305,6 +306,7 @@
     <ClCompile Include="DLNADmsContentDB.cpp" />
     <ClCompile Include="DLNADmsManager.cpp" />
     <ClCompile Include="DLNAManager.cpp" />
+    <ClCompile Include="DLNAParseConfig.cpp" />
     <ClCompile Include="DLNAParseProtocolInfo.cpp" />
     <ClCompile Include="DLNAParsePublicFolder.cpp" />
     <ClCompile Include="EpgDBManager.cpp" />

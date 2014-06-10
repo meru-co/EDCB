@@ -13,20 +13,15 @@ static WCHAR DIDLStart[] = L"<DIDL-Lite xmlns:dc=\"http://purl.org/dc/elements/1
 static WCHAR DIDLEnd[] = L"</DIDL-Lite>";
 
 
-CDLNADmsManager::CDLNADmsManager(void)
+CDLNADmsManager::CDLNADmsManager(CDLNAParseConfig& config, CDLNAParseProtocolInfo& protocol)
+	: pDlnaConfig(&config)
+	, pProtocolInfo(&protocol)
 {
 	this->rootUri = L"/dlna/dms";
 	this->fileRootUri = this->rootUri;
 	this->fileRootUri+=L"/file";
 	this->dmsDB.SetRootUri(this->fileRootUri);
 	this->subscribeCount = 0;
-
-	wstring filePath = L"";
-	GetModuleFolderPath(filePath);
-	filePath += L"\\dlna\\dms\\protocolInfo.txt";
-	protocolInfo.ParseText(filePath.c_str());
-
-	
 }
 
 
@@ -122,7 +117,31 @@ int CDLNADmsManager::RemoveContent(wstring objectID)
 	return dmsDB.RemoveContent(objectID);
 }
 
-int CDLNADmsManager::HttpRequest(string method, string uri, nocase::map<string, string>* headerList, CHttpRequestReader* reqReader, SOCKET clientSock, HANDLE stopEvent)
+int CDLNADmsManager::GetContentList(wstring objectID, list<DLNA_DMS_CONTENT_INFO>* contentList, bool bAddChild, SYSTEMTIME* pUpdateTime, unsigned __int64 *pUpdateID)
+{
+	int content_num = 0;
+	vector<DLNA_DMS_CONTAINER_INFO> childContainerList;
+	vector<DLNA_DMS_CONTENT_INFO> childContentList;
+	if(dmsDB.GetChildItem(objectID, &childContainerList, &childContentList)!=NO_ERR) {
+		return 0;
+	}
+	unsigned __int64 update_id = 0;
+	if(pUpdateTime) update_id = dmsDB.GetUpdateID(pUpdateTime);
+	if(pUpdateID) *pUpdateID = update_id;
+	for(vector<DLNA_DMS_CONTENT_INFO>::iterator it=childContentList.begin(); it!=childContentList.end(); it++, content_num++) {
+		if(contentList) {
+			contentList->push_back(*it);
+		}
+	}
+	if(bAddChild) {
+		for(vector<DLNA_DMS_CONTAINER_INFO>::iterator it=childContainerList.begin(); it!=childContainerList.end(); it++) {
+			content_num+=GetContentList(it->objectID, contentList, bAddChild);
+		}
+	}
+	return content_num;
+}
+
+int CDLNADmsManager::HttpRequest(string method, string uri, nocase::map<string, string>* headerList, CHttpRequestReader* reqReader, SOCKET clientSock, struct sockaddr_in* client, HANDLE stopEvent)
 {
 	int ret = 200;
 	string dddUri = "";
@@ -149,6 +168,47 @@ int CDLNADmsManager::HttpRequest(string method, string uri, nocase::map<string, 
 			this->uuid = "cdcdcdcd-cdcd-cdcd-cdcd-cdcdcdcdcdcd";
 		}
 	}
+
+	Log(CDLNAParseConfig::LOG_INFO, "HttpRequest : %s uri=%s\n", method.c_str(), uri.c_str());
+
+#ifdef MAC_FILTER
+	{
+		BOOL bMacAccept = FALSE;
+		CDLNAParseConfig::DLNA_MAC_ADDRESS mac={0,0,0,0,0,0};
+		switch(client->sin_family) {
+		case AF_INET:		
+			bMacAccept = pDlnaConfig->AcceptCheck(&client->sin_addr, &mac);
+			break;
+		default:
+			// IPv4ˆÈŠO‚Í–¢‘Î‰ž
+			break;
+		}
+		if(bMacAccept) {
+			Log(CDLNAParseConfig::LOG_INFO,"  Access ACCEPT : %d.%d.%d.%d MAC=%02X:%02X:%02X:%02X:%02X:%02X\n",
+				client->sin_addr.S_un.S_un_b.s_b1, client->sin_addr.S_un.S_un_b.s_b2, client->sin_addr.S_un.S_un_b.s_b3, client->sin_addr.S_un.S_un_b.s_b4,
+				mac.b1, mac.b2, mac.b3, mac.b4, mac.b5, mac.b6
+				);
+		} else {
+			Log(CDLNAParseConfig::LOG_INFO, "  Access DENYED : %d.%d.%d.%d MAC=%02X:%02X:%02X:%02X:%02X:%02X\n",
+				client->sin_addr.S_un.S_un_b.s_b1, client->sin_addr.S_un.S_un_b.s_b2, client->sin_addr.S_un.S_un_b.s_b3, client->sin_addr.S_un.S_un_b.s_b4,
+				mac.b1, mac.b2, mac.b3, mac.b4, mac.b5, mac.b6
+				);
+			ret = 403;
+			goto Err_End;
+		}
+	}
+#else
+	Log(CDLNAParseConfig::LOG_INFO, "  from : %d:%d:%d:%d\n",
+			client->sin_addr.S_un.S_un_b.s_b1, client->sin_addr.S_un.S_un_b.s_b2, client->sin_addr.S_un.S_un_b.s_b3, client->sin_addr.S_un.S_un_b.s_b4
+			);
+#endif
+	if(headerList) {
+		 nocase::map<string, string>::iterator it;
+		 for(it=headerList->begin(); it!=headerList->end(); it++) {
+			 Log(CDLNAParseConfig::LOG_DEBUG, "    %s : %s\n", it->first.c_str(), it->second.c_str());
+		 }
+	}
+
 
 	WtoA(rootUri, dddUri);
 	dddUri += "/ddd.xml";
@@ -262,6 +322,7 @@ int CDLNADmsManager::HttpRequest(string method, string uri, nocase::map<string, 
 	return ret;
 
 Err_End:
+	Log(CDLNAParseConfig::LOG_DEBUG, L"Error in HttpRequest() ret=%d\n", ret);
 	httpSend.SendResponseHeader(ret, &httpResHeader, clientSock, stopEvent);
 	return ret;
 }
@@ -275,10 +336,14 @@ int CDLNADmsManager::SendDDD(wstring filePath, SOCKET clientSock, HANDLE stopEve
 
 	HANDLE hFile = CreateFile( filePath.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL );
 	if( hFile == INVALID_HANDLE_VALUE ){
+		Log(CDLNAParseConfig::LOG_ERROR, L"Error in SendDDD() %s\n", filePath.c_str());
+		Log(CDLNAParseConfig::LOG_ERROR, L"  can not file open %s\n", filePath.c_str());
 		return 404;
 	}
 	DWORD dwFileSize = GetFileSize( hFile, NULL );
 	if( dwFileSize == 0 ){
+		Log(CDLNAParseConfig::LOG_ERROR, L"Error in SendDDD() %s\n", filePath.c_str());
+		Log(CDLNAParseConfig::LOG_ERROR, L"  file size 0\n");
 		CloseHandle(hFile);
 		return 404;
 	}
@@ -296,8 +361,11 @@ int CDLNADmsManager::SendDDD(wstring filePath, SOCKET clientSock, HANDLE stopEve
 	CloseHandle(hFile);
 	SAFE_DELETE_ARRAY(pszBuff);
 
+	string friendlyName;
+	pDlnaConfig->GetServerName(friendlyName);
+
 	Replace(strRead, "$uuid$", this->uuid);
-	Replace(strRead, "$friendlyName$", "EpgTimerSrv MediaServer");
+	Replace(strRead, "$friendlyName$", friendlyName);
 	Replace(strRead, "$manufacturer$", "test");
 	Replace(strRead, "$manufacturerURL$", "");
 	Replace(strRead, "$modelName$", "test");
@@ -356,6 +424,7 @@ int CDLNADmsManager::SoapCDS(nocase::map<string, string>* headerList, CHttpReque
 		return 400;
 	}
 	//OutputDebugStringA(soapBody);
+	Log(CDLNAParseConfig::LOG_INFO, "  >SoapCDS() : body = %s\n", soapBody);
 
 	if( soapUtil.ParseSOAPRequest(soapBody, soapBodySize, &soapReq) != NO_ERR ){
 		httpSend.SendResponseHeader(400, &httpResHeader, clientSock, stopEvent);
@@ -384,7 +453,9 @@ int CDLNADmsManager::SoapCDS(nocase::map<string, string>* headerList, CHttpReque
 	}else if( CompareNoCase(soapReq.actionName, L"Browse") == 0 ){
 		ret = CDS_Browse(host, &soapReq, resBody);
 	}else if( CompareNoCase(soapReq.actionName, L"CreateObject") == 0 ){
+		ret = 501;
 	}else if( CompareNoCase(soapReq.actionName, L"DestroyObject") == 0 ){
+		ret = 501;
 	}else{
 		httpResHeader.clear();
 		httpSend.SendResponseHeader(400, &httpResHeader, clientSock, stopEvent);
@@ -531,8 +602,11 @@ int CDLNADmsManager::CDS_GetSystemUpdateID(SOAP_REQUEST_INFO* soapReq, string& r
 	char* xml = NULL;
 	int xmlSize = 0;
 
+	char buf[20];
+	sprintf_s(buf, 20, "%I64u", dmsDB.GetUpdateID(NULL));
+
 	argItem.name = "Id";
-	argItem.val = "1";
+	argItem.val = buf;
 	argList.push_back(argItem);
 
 	soapUtil.CreateSOAPResponseBody((char*)UPNP_URN_CDS_1, "GetSystemUpdateIDResponse", &argList, xml, &xmlSize);
@@ -843,7 +917,7 @@ int CDLNADmsManager::CMS_GetProtocolInfo(SOAP_REQUEST_INFO* soapReq, string& res
 	map<wstring, wstring> idList;
 	map<wstring, wstring>::iterator itrID;;
 
-	for( itr = protocolInfo.supportList.begin(); itr != protocolInfo.supportList.end(); itr++ ){
+	for( itr = pProtocolInfo->supportList.begin(); itr != pProtocolInfo->supportList.end(); itr++ ){
 		idList.insert(pair<wstring, wstring>(itr->second.info,itr->second.info));
 	}
 	for( itrID = idList.begin(); itrID != idList.end(); itrID++ ){

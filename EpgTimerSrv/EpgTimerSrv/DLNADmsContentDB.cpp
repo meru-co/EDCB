@@ -6,10 +6,11 @@
 CDLNADmsContentDB::CDLNADmsContentDB(void)
 {
 	this->root = new DLNA_DMS_CONTAINER_ITEM;
-	this->root->objectID = L"0";
+	this->root->objectID = GetRootObjectID();
 	this->root->info = NULL;
 
 	this->nextObjectID = 1;
+	ResetUpdateID();
 }
 
 
@@ -33,6 +34,7 @@ void CDLNADmsContentDB::SetRootUri(wstring uri)
 	if( lock.Lock(L"CDLNADmsContentDB::SetRootUri") == FALSE ){
 		return;
 	}
+	UpdateID();
 
 	this->rootUri = uri;
 
@@ -44,6 +46,7 @@ int CDLNADmsContentDB::CreateContainer(wstring parentObjectID, DLNA_DMS_CONTAINE
 	if( lock.Lock(L"CDLNADmsContentDB::CreateContainer") == FALSE ){
 		return ERR_FALSE;
 	}
+	UpdateID();
 
 	int ret = NO_ERR;
 	map<wstring, DLNA_DMS_CONTENT_ITEM*>::iterator itr1;
@@ -66,7 +69,7 @@ int CDLNADmsContentDB::CreateContainer(wstring parentObjectID, DLNA_DMS_CONTAINE
 	containerInfo->info = new DLNA_DMS_CONTAINER_META_INFO;
 	*containerInfo->info = *info;
 
-	if( CompareNoCase(parentObjectID, L"0") == 0 ){
+	if( CompareNoCase(parentObjectID, GetRootObjectID()) == 0 ){
 		containerList.insert(pair<wstring, DLNA_DMS_CONTAINER_ITEM*>(containerInfo->objectID, containerInfo));
 		root->childContainer.insert(pair<wstring, DLNA_DMS_CONTAINER_ITEM*>(containerInfo->objectID, containerInfo));
 	}else{
@@ -92,13 +95,14 @@ int CDLNADmsContentDB::DeleteContainer(wstring objectID)
 	if( lock.Lock(L"CDLNADmsContentDB::DeleteContainer") == FALSE ){
 		return ERR_FALSE;
 	}
+	UpdateID();
 
 	int ret = NO_ERR;
 	map<wstring, DLNA_DMS_CONTAINER_ITEM*>::iterator itr1;
 	map<wstring, DLNA_DMS_CONTAINER_ITEM*>::iterator itr2;
 	map<wstring, DLNA_DMS_CONTAINER_ITEM*>::iterator itr3;
 
-	if( CompareNoCase(objectID, L"0") == 0 ){
+	if( CompareNoCase(objectID, GetRootObjectID()) == 0 ){
 		ret = ERR_FALSE;
 		goto Err_End;
 	}
@@ -136,6 +140,7 @@ int CDLNADmsContentDB::AddContent(wstring containerObjectID, DLNA_DMS_CONTENT_ME
 	if( lock.Lock(L"CDLNADmsContentDB::AddContent") == FALSE ){
 		return ERR_FALSE;
 	}
+	UpdateID();
 
 	int ret = NO_ERR;
 	map<wstring, DLNA_DMS_CONTENT_ITEM*>::iterator itr1;
@@ -158,7 +163,7 @@ int CDLNADmsContentDB::AddContent(wstring containerObjectID, DLNA_DMS_CONTENT_ME
 	contentInfo->info = new DLNA_DMS_CONTENT_META_INFO;
 	*contentInfo->info = *info;
 
-	if( CompareNoCase(objectID, L"0") == 0 ){
+	if( CompareNoCase(objectID, GetRootObjectID()) == 0 ){
 		contentList.insert(pair<wstring, DLNA_DMS_CONTENT_ITEM*>(contentInfo->objectID, contentInfo));
 		root->childContent.insert(pair<wstring, DLNA_DMS_CONTENT_ITEM*>(contentInfo->objectID, contentInfo));
 	}else{
@@ -184,13 +189,14 @@ int CDLNADmsContentDB::RemoveContent(wstring objectID)
 	if( lock.Lock(L"CDLNADmsContentDB::RemoveContent") == FALSE ){
 		return ERR_FALSE;
 	}
+	UpdateID();
 
 	int ret = NO_ERR;
 	map<wstring, DLNA_DMS_CONTENT_ITEM*>::iterator itr1;
 	map<wstring, DLNA_DMS_CONTAINER_ITEM*>::iterator itr2;
 	map<wstring, DLNA_DMS_CONTENT_ITEM*>::iterator itr3;
 
-	if( CompareNoCase(objectID, L"0") == 0 ){
+	if( CompareNoCase(objectID, GetRootObjectID()) == 0 ){
 		ret = ERR_FALSE;
 		goto Err_End;
 	}
@@ -240,7 +246,7 @@ int CDLNADmsContentDB::GetChildItem(wstring containerObjectID, vector<DLNA_DMS_C
 
 	DLNA_DMS_CONTAINER_ITEM* parent = NULL;
 
-	if( CompareNoCase(containerObjectID, L"0") == 0 ){
+	if( CompareNoCase(containerObjectID, GetRootObjectID()) == 0 ){
 		parent = root;
 	}else{
 		itr1 = containerList.find(containerObjectID);
@@ -296,7 +302,7 @@ int CDLNADmsContentDB::GetContainerItem(wstring containerObjectID, DLNA_DMS_CONT
 
 	DLNA_DMS_CONTAINER_ITEM* item = NULL;
 
-	if( CompareNoCase(containerObjectID, L"0") == 0 ){
+	if( CompareNoCase(containerObjectID, GetRootObjectID()) == 0 ){
 		item = root;
 	}else{
 		itr1 = containerList.find(containerObjectID);
@@ -347,6 +353,12 @@ Err_End:
 	lock.UnLock();
 
 	return ret;
+}
+
+unsigned __int64 CDLNADmsContentDB::GetUpdateID(SYSTEMTIME* time)
+{
+	if(time) *time=stUpdateTime;
+	return updateID;
 }
 
 int CDLNADmsContentDB::SearchFilePath(string uri, wstring& filePath)
@@ -434,6 +446,7 @@ int CDLNADmsContentDB::CreateContainer2(wstring virtualPath, DLNA_DMS_CONTAINER_
 	if( lock.Lock(L"CDLNADmsContentDB::CreateContainer2") == FALSE ){
 		return ERR_FALSE;
 	}
+	UpdateID();
 
 	int ret = NO_ERR;
 	map<wstring, DLNA_DMS_CONTAINER_ITEM*>::iterator itr1;
